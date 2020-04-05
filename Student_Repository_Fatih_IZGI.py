@@ -6,7 +6,7 @@
 """
 
 import os
-from typing import Dict, List, Iterator, Tuple, Union, Optional
+from typing import Dict, List, Iterator, Tuple, Union, Set
 from collections import defaultdict
 from prettytable import PrettyTable
 
@@ -26,7 +26,15 @@ class Student:
         """ enroll student to a course """
         self.courses.update(zip(course.keys(), course.values()))  # multiple courses can be added
 
-    def gpa(self) -> Optional[Union[int, float]]:
+    def add_remaining_req(self, course: str) -> None:
+        """ add remaining required course to the container """
+        self.remaining_req.append(course)
+
+    def add_remaining_elc(self, course: str) -> None:
+        """ add remaining elective course to the container """
+        self.remaining_elc.append(course)
+
+    def gpa(self) -> float:
         """ calculates and return the GPA of the student """
         grades: Dict[str, float] = {"A": 4.00, "A-": 3.75, "B+": 3.25, "B": 3.00,
                                     "B-": 2.75, "C+": 2.25, "C": 2.00, "C-": 0.00,
@@ -38,7 +46,7 @@ class Student:
         except ZeroDivisionError:
             return 0
 
-    def info(self) -> List[Union[str, str, str, List[str], List[str], List[str], int]]:
+    def info(self) -> List[Union[str, str, str, List[str], List[str], List[str], float]]:
         """ returns the summary data about a single student """
         return [self.cwid, self.name, self.major, sorted(self.courses.keys()),
                 sorted(self.remaining_req), sorted(self.remaining_elc), self.gpa()]
@@ -63,6 +71,13 @@ class Instructor:
             yield [self.cwid, self.name, self.department, course, number]
 
 
+class Major:
+    """ a class to store the Major data """
+    def __init__(self):
+        """ store the Major info """
+        self.courses: Dict[str, Set[str]] = defaultdict(set)  # {"R" or "E": (courses)}
+
+
 class Repository:
     """ holds all of the data for a specific organization """
     def __init__(self, dir_path) -> None:
@@ -72,21 +87,18 @@ class Repository:
 
         self.students: Dict[str, Student] = dict()  # container {cwid: StudentObject}
         self.instructors: Dict[str, Instructor] = dict()  # container {cwid: InstructorObject}
-        self.departments: Dict[str, Dict[str, str]] = dict()
+        self.departments: Dict[str, Major] = dict()
         self.dir_path: str = dir_path
 
         self.process_files()  # process the data in students, instructors and grades files
 
     def department_info(self) -> Iterator[Tuple[str, List[str], List[str]]]:
         """ a generator which yields the summary data about department """
-        for major, courses in self.departments.items():
-            req_list: List[str] = []  # = [name for name, r_e in courses.items() if r_e == "R"]
-            elc_list: List[str] = []  # = [name for name, r_e in courses.items() if r_e == "E"]
+        for dep_name, details in self.departments.items():
+            req_list: List[str] = list(details.courses["R"])
+            elc_list: List[str] = list(details.courses["E"])
 
-            for name, r_e in courses.items():
-                (req_list if r_e == "R" else elc_list).append(name)
-
-            yield [major, sorted(req_list), sorted(elc_list)]
+            yield [dep_name, sorted(req_list), sorted(elc_list)]
 
     def process_files(self) -> None:
         """ process the data in students, instructors and grades files """
@@ -113,17 +125,21 @@ class Repository:
                 self.students[std_cwid].enroll_or_update({course: letter_grade})
             self.instructors[inst_cwid].add_or_update(course)
 
-        for major, req_elc, course in \
+        major: Major = Major()
+        for dep_name, req_elc, course in \
                 file_reader(os.path.join(self.dir_path, "majors.txt"), 3, sep="\t", header=True):
-            if major in self.departments:
-                self.departments[major][course] = req_elc
-            else:
-                self.departments[major] = {course: req_elc}
+            if dep_name not in self.departments:
+                major = Major()
+
+            major.courses[req_elc].add(course)
+            self.departments[dep_name] = major
 
         for student in self.students.values():
-            for course, r_e in self.departments[student.major].items():
-                if course not in student.courses:
-                    (student.remaining_req if r_e == "R" else student.remaining_elc).append(course)
+            for r_e, courses in self.departments[student.major].courses.items():
+                for course in courses:
+                    if course not in student.courses:
+                        (student.add_remaining_req if r_e == "R"
+                         else student.add_remaining_elc)(course)
 
         self.pretty_print()
 
