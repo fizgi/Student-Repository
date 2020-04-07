@@ -13,6 +13,7 @@ from prettytable import PrettyTable
 
 class Student:
     """ stores information about a single student """
+
     def __init__(self, cwid: str, name: str, major: str) -> None:
         """ store the Student info """
         self.cwid: str = cwid
@@ -54,6 +55,7 @@ class Student:
 
 class Instructor:
     """ stores information about a single Instructor """
+
     def __init__(self, cwid: str, name: str, department: str) -> None:
         """ store the Instructor info """
         self.cwid: str = cwid
@@ -73,6 +75,7 @@ class Instructor:
 
 class Major:
     """ a class to store the Major data """
+
     def __init__(self):
         """ store the Major info """
         self.courses: Dict[str, Set[str]] = defaultdict(set)  # {"R" or "E": (courses)}
@@ -80,6 +83,7 @@ class Major:
 
 class Repository:
     """ holds all of the data for a specific organization """
+
     def __init__(self, dir_path) -> None:
         """ store the organization info """
         if not os.path.exists(dir_path):  # if the specified directory does not exist
@@ -138,8 +142,12 @@ class Repository:
             for r_e, courses in self.departments[student.major].courses.items():
                 for course in courses:
                     if course not in student.courses:
-                        (student.add_remaining_req if r_e == "R"
-                         else student.add_remaining_elc)(course)
+                        std_course_set: Set[str] = set(student.courses.keys())
+                        dept_elc_set: Set[str] = set(self.departments[student.major].courses["E"])
+                        if r_e == "R":
+                            student.add_remaining_req(course)
+                        elif r_e == "E" and len(std_course_set.intersection(dept_elc_set)) < 1:
+                            student.add_remaining_elc(course)
 
         self.pretty_print()
 
