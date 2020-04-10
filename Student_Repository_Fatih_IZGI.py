@@ -1,11 +1,12 @@
 """ A data repository of courses, students, and instructors.
 
     author: Fatih IZGI
-    date: 04-Apr-2020
-    version: python 3.8.2
+    date: 10-Apr-2020
+    python: v3.8.2
 """
 
 import os
+import sqlite3
 from typing import Dict, List, Iterator, Tuple, Union, Set
 from collections import defaultdict
 from prettytable import PrettyTable
@@ -40,6 +41,7 @@ class Student:
         grades: Dict[str, float] = {"A": 4.00, "A-": 3.75, "B+": 3.25, "B": 3.00,
                                     "B-": 2.75, "C+": 2.25, "C": 2.00, "C-": 0.00,
                                     "D+": 0.00, "D": 0.00, "D-": 0.00, "F": 0.00}
+
         try:
             avg: float = sum([grades[grade] for grade in self.courses.values()]) / len(
                 self.courses.values())
@@ -49,7 +51,9 @@ class Student:
 
     def info(self) -> List[Union[str, str, str, List[str], List[str], List[str], float]]:
         """ returns the summary data about a single student """
-        return [self.cwid, self.name, self.major, sorted(self.courses.keys()),
+        std_passed_elc_set: List[str] = [c for c, g in self.courses.items() if g in ["A", "A-", "B+", "B", "B-", "C+", "C"]]
+
+        return [self.cwid, self.name, self.major, sorted(std_passed_elc_set),
                 sorted(self.remaining_req), sorted(self.remaining_elc), self.gpa()]
 
 
@@ -94,7 +98,12 @@ class Repository:
         self.departments: Dict[str, Major] = dict()
         self.dir_path: str = dir_path
 
-        self.process_files()  # process the data in students, instructors and grades files
+        try:
+            self.process_files()  # process the data in students, instructors and grades files
+        except ValueError as ve:
+            print(ve)
+        except FileNotFoundError as fnfe:
+            print(fnfe)
 
     def department_info(self) -> Iterator[Tuple[str, List[str], List[str]]]:
         """ a generator which yields the summary data about department """
@@ -107,17 +116,17 @@ class Repository:
     def process_files(self) -> None:
         """ process the data in students, instructors and grades files """
         for cwid, name, major in \
-                file_reader(os.path.join(self.dir_path, "students.txt"), 3, sep=";", header=True):
+                file_reader(os.path.join(self.dir_path, "students.txt"), 3, header=True):
             student: Student = Student(cwid, name, major)
             self.students[cwid] = student  # add the new student to the container
 
         for cwid, name, department in \
-                file_reader(os.path.join(self.dir_path, "instructors.txt"), 3, "|", True):
+                file_reader(os.path.join(self.dir_path, "instructors.txt"), 3, header=True):
             instructor: Instructor = Instructor(cwid, name, department)
             self.instructors[cwid] = instructor
 
         for std_cwid, course, letter_grade, inst_cwid in \
-                file_reader(os.path.join(self.dir_path, "grades.txt"), 4, sep="|", header=True):
+                file_reader(os.path.join(self.dir_path, "grades.txt"), 4, header=True):
             if std_cwid not in self.students.keys():
                 raise ValueError(f"A grade for an unknown student with cwid: {std_cwid}")
 
@@ -125,28 +134,32 @@ class Repository:
                 raise ValueError(f"A grade for an unknown instructor with cwid: {inst_cwid}")
 
             # find the student and instructor by cwid and update their course list
-            if letter_grade in ["A", "A-", "B+", "B", "B-", "C+", "C"]:
-                self.students[std_cwid].enroll_or_update({course: letter_grade})
+            self.students[std_cwid].enroll_or_update({course: letter_grade})
             self.instructors[inst_cwid].add_or_update(course)
 
         major: Major = Major()
         for dep_name, req_elc, course in \
-                file_reader(os.path.join(self.dir_path, "majors.txt"), 3, sep="\t", header=True):
+                file_reader(os.path.join(self.dir_path, "majors.txt"), 3, header=True):
             if dep_name not in self.departments:
                 major = Major()
 
             major.courses[req_elc].add(course)
             self.departments[dep_name] = major
 
+        passing_grades: List[str] = ["A", "A-", "B+", "B", "B-", "C+", "C"]
         for student in self.students.values():
             for r_e, courses in self.departments[student.major].courses.items():
                 for course in courses:
-                    if course not in student.courses:
-                        std_course_set: Set[str] = set(student.courses.keys())
-                        dept_elc_set: Set[str] = set(self.departments[student.major].courses["E"])
+                    dept_req: Set[str] = self.departments[student.major].courses["R"]
+                    std_passed_req: List[str] = [c for c, g in student.courses.items()
+                                                 if c in dept_req and g in passing_grades]
+                    if course not in std_passed_req:
+                        dept_elc: Set[str] = self.departments[student.major].courses["E"]
+                        std_passed_elc: List[str] = [c for c, g in student.courses.items()
+                                                     if c in dept_elc and g in passing_grades]
                         if r_e == "R":
                             student.add_remaining_req(course)
-                        elif r_e == "E" and len(std_course_set.intersection(dept_elc_set)) < 1:
+                        elif r_e == "E" and len(std_passed_elc) < 1:
                             student.add_remaining_elc(course)
 
         self.pretty_print()
@@ -166,13 +179,21 @@ class Repository:
 
         instructor_table: PrettyTable = PrettyTable()
         instructor_table.field_names = ["CWID", "Name", "Dept", "Course", "Student"]
-        for instructor in self.instructors.values():
-            for info in instructor.info():
-                instructor_table.add_row(info)  # add instructor info to the table
+        # for instructor in self.instructors.values():
+        #     for info in instructor.info():
+        #         instructor_table.add_row(info)  # add instructor info to the table
+        for info in instructor_table_db("810_startup.db"):
+            instructor_table.add_row(info)
 
-        print(department_table)
-        print("Student Summary\n", student_table, sep="")
-        print("Instructor Summary\n", instructor_table, sep="")
+        student_grade_table: PrettyTable = PrettyTable()
+        student_grade_table.field_names = ["Name", "CWID", "Course", "Grade", "Instructor"]
+        for info in student_grade_table_db("810_startup.db"):
+            student_grade_table.add_row(info)
+
+        print(department_table, sep="")
+        print("Student Summary (FROM LOCAL FILES)\n", student_table, sep="")
+        print("Instructor Summary (FROM DB)\n", instructor_table, sep="")
+        print("Student Grade Summary (FROM DB)\n", student_grade_table, sep="")
 
 
 def file_reader(path: str, fields: int, sep: str = "\t", header: bool = False) \
@@ -198,12 +219,29 @@ def file_reader(path: str, fields: int, sep: str = "\t", header: bool = False) \
                 yield row_fields
 
 
+def instructor_table_db(db_file: str):
+    """ yields information about a single instructor from database """
+    db: sqlite3.Connection = sqlite3.connect(db_file)
+    query: str = "select i.CWID, i.Name, i.Dept, g.Course, count(*) " \
+                 "from grades g join instructors i on g.InstructorCWID = i.CWID " \
+                 "group by i.CWID, g.Course order by i.CWID desc, g.Course desc"
+    for cwid, name, department, course, count in db.execute(query):
+        yield [cwid, name, department, course, count]
+
+
+def student_grade_table_db(db_file: str):
+    """ yields student grade table from database """
+    db: sqlite3.Connection = sqlite3.connect(db_file)
+    query: str = "select s.Name, s.CWID, g.Course, g.Grade, i.Name as 'Instructor' " \
+                 "from grades g join students s on g.StudentCWID = s.CWID " \
+                 "join instructors i on g.InstructorCWID = i.CWID order by s.Name"
+    for name, cwid, course, grade, instructor in db.execute(query):
+        yield [name, cwid, course, grade, instructor]
+
+
 def main():
     """ the main class to get the data for each organization """
-    stevens = Repository("stevens")  # read files and generate prettytables
-    stevens.department_info()
-    # njit = Repository("njit")
-    # test = Repository("test")
+    stevens: Repository = Repository("stevens")  # read files and generate prettytables
 
 
 if __name__ == '__main__':
